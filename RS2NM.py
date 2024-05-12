@@ -13,7 +13,7 @@
 # Arguments:
 #   - Target
 #   - File Save Location
-#       - If no location is selected then it will default to the pwd
+#       - If no location selected then it will default to the pwd
 # python3 rs2nm.py <Target> <FS Location>
 
 # Code Version: 1.0
@@ -22,7 +22,6 @@
 # 12/05/2024: Initial Code Build
 #             Who Doesn't Like Colours'
 #             Added Help Bit just in case
-#             Added KeyboardInterrupt Catch
 #
 
 import subprocess
@@ -96,47 +95,7 @@ def main():
         if not open_ports:
             print(Fore.CYAN + "\n\nCanny find anything, tough luck, see you next week."+Style.RESET_ALL)
             sys.exit(0)
-ustscan_error:
-            print(Fore.RED + "\n\nExcuse me pal\n Someone(probably dean) fucked up because I canny run RustScan:\n", rustscan_error.decode()+Style.RESET_ALL)
-            sys.exit(1)
 
-        # Extract ports
-        open_ports = ""
-        for line in rustscan_output.decode().split('\n'):
-            if "->" in line:
-                open_ports = line.split("->")[1].strip()[1:-1]
-                break
-
-        if not open_ports:
-            print(Fore.CYAN + "\n\nCanny find anything, tough luck, see you next week."+Style.RESET_ALL)
-            sys.exit(0)
-
-        print(Fore.GREEN + "\n\nOOoh, There are a few ports open \nGonnae copy these to NMAP for ye, for some intricate.... ;)  scanning...\n({})".format(Fore.MAGENTA + open_ports + Style.RESET_ALL) + Style.RESET_ALL)
-
-        # Run Nmap
-        nmap_output_file = os.path.join(save_location, "{}_nmap_results".format(The_Bad_Guy))
-        nmap_process = subprocess.Popen(["nmap", "-sC", "-sV", "-oA", nmap_output_file, "-p", open_ports, The_Bad_Guy], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        nmap_output, nmap_error = nmap_process.communicate()
-
-        if nmap_error:
-            print(Fore.RED + "\n\nExcuse me pal\n Someone(probably dean) fucked up because I canny run NMap:", nmap_error.decode()+Style.RESET_ALL)
-            sys.exit(1)
-
-        print(nmap_output.decode())
-        print(Fore.GREEN + "I've saved your loot here:", nmap_output_file + Style.RESET_ALL)
-
-    except KeyboardInterrupt:
-        while True:
-            confirmation = input(Fore.YELLOW + "\n\nAre you sure you want to exit? (k/n): " + Style.RESET_ALL)
-            if confirmation.lower() == 'k':
-                print(Fore.RED + "\n\nNobody Likes you anyway..." + Style.RESET_ALL)
-                sys.exit(0)
-            elif confirmation.lower() == 'n':
-                print(Fore.YELLOW + "\n\nMore? Well I'm Quitting anyway\n Just Press the Up Arrow and don't CTRL+C again ¬_¬" + Style.RESET_ALL)
-                sys.exit(0)
-            elif confirmation.lower() == 'y':
-                print(Fore.YELLOW + "\n\nMaybe you should read the instructions... \n Exiting...." + Style.RESET_ALL)
-                sys.exit(0)
         print(Fore.GREEN + "\n\nOOoh, There are a few ports open \nGonnae copy these to NMAP for ye, for some intricate.... ;)  scanning...\n({})".format(Fore.MAGENTA + open_ports + Style.RESET_ALL) + Style.RESET_ALL)
 
         # Run Nmap
@@ -166,6 +125,5 @@ ustscan_error:
             else:
                 print(Fore.RED + "\n\nInvalid input. Please enter 'y' or 'n'." + Style.RESET_ALL)
                 continue
-
 if __name__ == "__main__":
     main()
