@@ -13,13 +13,14 @@
 # Arguments:
 #   - Target
 #   - File Save Location
+#       - If no location selected then it will default to the pwd
 # python3 rs2nm.py <Target> <FS Location>
 
-# Code Version: 1.0
+# Code Version: 1.1
 #
 # Updates:
 # 12/05/2024: Initial Code Build
-#
+#             What is capital letters
 #
 
 import subprocess
@@ -38,14 +39,14 @@ def main():
     # Set the default output directory to current directory if not provided
     save_location = os.getcwd() if len(sys.argv) < 3 else sys.argv[2]
 
-    print("Just gonnae run a quick wee rustscan test \n You Selected: {}...\n Estimated Time Remaining: 1h 35m\n\n Just Kidding, only going to take a few seconds, they say".format(The_Bad_Guy))
+    print("Just gonnae run a quick wee rustscan test \n You selected: {}...\n Estimated Time Remaining: 1h 35m\n\n Just kidding, only going to take a few seconds, they say".format(The_Bad_Guy))
 
     # Find open ports
     rustscan_process = subprocess.Popen(["rustscan", "-g", "-a", The_Bad_Guy, "--ulimit", "5000"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     rustscan_output, rustscan_error = rustscan_process.communicate()
 
     if rustscan_error:
-        print("\n\nExcuse me Pal\n Someone(probably dean) Fucked up because I Canny run RustScan:\n", rustscan_error.decode())
+        print("\n\nExcuse me pal\n Someone(probably dean) fucked up because I canny run RustScan:\n", rustscan_error.decode())
         sys.exit(1)
 
     # Extract ports
@@ -59,7 +60,7 @@ def main():
         print("\n\nCanny find anything, tough luck, see you next week.")
         sys.exit(0)
 
-    print("\n\nOOoh, There are a few ports open \n Gonnae copy these to NMAP for ye, for some intricate.... ;)  scanning... \n ({})".format(open_ports))
+    print("\n\nOOoh, There are a few ports open \n Gonnae copy these to NMAP for ye, for some intricate.... ;)  scanning... \n\n ({})".format(open_ports))
 
     # Run Nmap
     nmap_output_file = os.path.join(save_location, "{}_nmap_results".format(The_Bad_Guy))
@@ -67,7 +68,7 @@ def main():
     nmap_output, nmap_error = nmap_process.communicate()
 
     if nmap_error:
-        print("\n\nExcuse me Pal\n Someone(probably dean) Fucked up because I Canny run NMap:", nmap_error.decode())
+        print("\n\nExcuse me pal\n Someone(probably dean) fucked up because I canny run NMap:", nmap_error.decode())
         sys.exit(1)
 
     print(nmap_output.decode())
