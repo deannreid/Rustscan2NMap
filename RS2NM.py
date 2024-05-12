@@ -10,11 +10,18 @@
 # Just a script to save 2 seconds that will automagically grab Rustscan ports and submit them
 # to NMAP for some further detailed anal.lysis...
 #
+# Arguments:
+#   - Target
+#   - File Save Location
+# python3 rs2nm.py <Target> <FS Location>
+
 # Code Version: 1.0
 #
 # Updates:
 # 12/05/2024: Initial Code Build
 #
+#
+
 import subprocess
 import sys
 import os
