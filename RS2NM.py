@@ -13,7 +13,7 @@
 # Arguments:
 #   - Target
 #   - File Save Location
-#       - If no location selected then it will default to the pwd
+#       - If no location is selected then it will default to the pwd
 # python3 rs2nm.py <Target> <FS Location>
 
 # Code Version: 1.0
@@ -45,7 +45,7 @@ def print_help():
     Arguments:
       - Target (NO FLAG REQUIRED JUST IP)
       - File Save Location
-          - If no location selected then it will default to the pwd
+          - If no location is selected then it will default to the pwd
       - Help: Use '-h' or '--help' to display help information
 
     Code Version: 1.1
@@ -53,8 +53,13 @@ def print_help():
     Updates:
     12/05/2024: Initial Code Build
                 Who Doesn't Like Colours'
-                Added Help Bit just in-case
+                Added Help Bit just in case
     """)
+
+def run_nmap(nmap_command):
+    nmap_process = subprocess.Popen(nmap_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    nmap_output, nmap_error = nmap_process.communicate()
+    return nmap_output.decode(), nmap_error.decode()
 
 def main():
     try:
@@ -99,15 +104,22 @@ def main():
         print(Fore.GREEN + "\n\nOOoh, There are a few ports open \nGonnae copy these to NMAP for ye, for some intricate.... ;)  scanning...\n({})".format(Fore.MAGENTA + open_ports + Style.RESET_ALL) + Style.RESET_ALL)
 
         # Run Nmap
+
+  # Run Nmap
         nmap_output_file = os.path.join(save_location, "{}_nmap_results".format(The_Bad_Guy))
-        nmap_process = subprocess.Popen(["nmap", "-sC", "-sV", "-oA", nmap_output_file, "-p", open_ports, The_Bad_Guy], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        nmap_output, nmap_error = nmap_process.communicate()
+        nmap_command = ["nmap", "-p", open_ports, "-sC", "-sV", "-oA", nmap_output_file, The_Bad_Guy]
+
+        nmap_output, nmap_error = run_nmap(nmap_command)
+        if "Note: Host seems down. If it is really up, but blocking our ping probes, try -Pn" in nmap_output:
+            print(Fore.RED + "\nHost seems down or is blocking ping probes. Retrying without Host Discovery..." + Style.RESET_ALL)
+            nmap_command.insert(1, "-Pn")
+            nmap_output, nmap_error = run_nmap(nmap_command)
 
         if nmap_error:
-            print(Fore.RED + "\n\nExcuse me pal\n Someone(probably dean) fucked up because I canny run NMap:", nmap_error.decode()+Style.RESET_ALL)
+            print(Fore.RED + "\n\nExcuse me pal\n Someone(probably dean) fucked up because I canny run NMap:", nmap_error + Style.RESET_ALL)
             sys.exit(1)
 
-        print(nmap_output.decode())
+        print(nmap_output)
         print(Fore.GREEN + "I've saved your loot here:", nmap_output_file + Style.RESET_ALL)
 
     except KeyboardInterrupt:
