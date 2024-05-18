@@ -22,6 +22,7 @@
 # 12/05/2024: Initial Code Build
 #             Who Doesn't Like Colours'
 #             Added Help Bit just in case
+# 18/05/2024: Added Host Discovery Blocker Fix
 #
 
 import subprocess
@@ -54,6 +55,7 @@ def print_help():
     12/05/2024: Initial Code Build
                 Who Doesn't Like Colours'
                 Added Help Bit just in case
+    18/05/2024: Added Host Discovery Blocker Fix
     """)
 
 def run_nmap(nmap_command):
