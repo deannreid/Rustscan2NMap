@@ -8,7 +8,7 @@
 # Script Information:
 #
 # Just a script to save 2 seconds that will automagically grab Rustscan ports and submit them
-# to NMAP for some further detailed anal.lysis...
+# to NMAP for some further detailed analysis...
 #
 # Arguments:
 #   - Target
@@ -16,13 +16,15 @@
 #       - If no location is selected then it will default to the pwd
 # python3 rs2nm.py <Target> <FS Location>
 
-# Code Version: 1.7
+# Code Version: 1.7.1
 #
 # Updates:
 # 12/05/2024: Initial Code Build
 #             Who Doesn't Like Colours'
 #             Added Help Bit just in case
 # 18/05/2024: Added Host Discovery Blocker Fix
+# 19/05/2024: Added Automatic Domain Append to /etc/hosts
+#             Improved Domain Extraction with Regular Expressions
 #
 
 import subprocess
@@ -30,6 +32,7 @@ import sys
 import os
 import colorama
 from colorama import Fore, Style
+import re
 
 def print_help():
     print("""
@@ -41,7 +44,7 @@ def print_help():
     Script Information:
 
     Just a script to save 2 seconds that will automagically grab Rustscan ports and submit them
-    to NMAP for some further detailed anal.lysis...
+    to NMAP for some further detailed analysis...
 
     Arguments:
       - Target (NO FLAG REQUIRED JUST IP)
@@ -49,7 +52,7 @@ def print_help():
           - If no location is selected then it will default to the pwd
       - Help: Use '-h' or '--help' to display help information
 
-    Code Version: 1.1
+    Code Version: 1.7.1
 
     Updates:
     12/05/2024: Initial Code Build
@@ -57,6 +60,7 @@ def print_help():
                 Added Help Bit just in case
     18/05/2024: Added Host Discovery Blocker Fix
     19/05/2024: Added Automatic Domain Append to /etc/hosts
+                Improved Domain Extraction with Regular Expressions
     """)
 
 def run_nmap(nmap_command):
@@ -68,18 +72,16 @@ def add2Hosts(nmap_output, target_ip):
     print(Fore.CYAN + "Checking for open port 389 and extracting domain information..." + Style.RESET_ALL)
     for line in nmap_output.split('\n'):
         if '389/tcp' in line and 'open' in line and 'Microsoft Windows Active Directory LDAP' in line:
-            print(Fore.GREEN + "Looks like a Domain. Port 389 found with LDAP information: " + line + Style.RESET_ALL)
-            # Extract domain from the line
-            start_index = line.find('Domain:') + len('Domain:')
-            end_index = line.find(',', start_index)
-            if end_index == -1:
-                end_index = line.find(')', start_index)
-            domain = line[start_index:end_index].strip()
-            print(Fore.GREEN + f"Extracted domain: {domain}" + Style.RESET_ALL)
-            with open('/etc/hosts', 'a') as hosts_file:
-                hosts_file.write(f"{target_ip}\t{domain}\n")
-            print(Fore.GREEN + f"Added {domain} to /etc/hosts with IP {target_ip}" + Style.RESET_ALL)
-            return
+            print(Fore.GREEN + "Looks like a Domain. Port 389 found with LDAP information:\n" + line + Style.RESET_ALL)
+            # Extract domain from the line using regular expressions
+            domain_match = re.search(r'Domain: ([^\s,]+)', line)
+            if domain_match:
+                domain = domain_match.group(1).rstrip('.0')
+                print(Fore.GREEN + f"Extracted domain: {domain}" + Style.RESET_ALL)
+                with open('/etc/hosts', 'a') as hosts_file:
+                    hosts_file.write(f"{target_ip}\t{domain}\n")
+                print(Fore.GREEN + f"Added {domain} to /etc/hosts with IP {target_ip}" + Style.RESET_ALL)
+                return
     print(Fore.RED + "No relevant domain information found for port 389." + Style.RESET_ALL)
 
 def main():
@@ -108,7 +110,7 @@ def main():
         rustscan_output, rustscan_error = rustscan_process.communicate()
 
         if rustscan_error:
-            print(Fore.RED + "\n\nExcuse me pal\n Someone(probably dean) fucked up because I canny run RustScan:\n", rustscan_error.decode()+Style.RESET_ALL)
+            print(Fore.RED + "\n\nExcuse me pal\n Someone(probably dean) fucked up because I canny run RustScan:\n", rustscan_error.decode() + Style.RESET_ALL)
             sys.exit(1)
 
         # Extract ports
@@ -119,7 +121,7 @@ def main():
                 break
 
         if not open_ports:
-            print(Fore.CYAN + "\n\nCanny find anything, tough luck, see you next week."+Style.RESET_ALL)
+            print(Fore.CYAN + "\n\nCanny find anything, tough luck, see you next week." + Style.RESET_ALL)
             sys.exit(0)
 
         print(Fore.GREEN + "\n\nOOoh, There are a few ports open \nGonnae copy these to NMAP for ye, for some intricate.... ;)  scanning...\n({})".format(Fore.MAGENTA + open_ports + Style.RESET_ALL) + Style.RESET_ALL)
