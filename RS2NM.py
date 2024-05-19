@@ -16,7 +16,7 @@
 #       - If no location is selected then it will default to the pwd
 # python3 rs2nm.py <Target> <FS Location>
 
-# Code Version: 1.0
+# Code Version: 1.1
 #
 # Updates:
 # 12/05/2024: Initial Code Build
@@ -63,6 +63,22 @@ def run_nmap(nmap_command):
     nmap_output, nmap_error = nmap_process.communicate()
     return nmap_output.decode(), nmap_error.decode()
 
+def add2Hosts(nmap_output, target_ip):
+    print(Fore.CYAN + "Checking for open port 389 and extracting domain information..." + Style.RESET_ALL)
+    for line in nmap_output.split('\n'):
+        if '389/tcp' in line and 'open' in line and 'Microsoft Windows Active Directory LDAP' in line:
+            print(Fore.GREEN + "Looks like a Domain. Port 389 found with LDAP information: " + line + Style.RESET_ALL)
+            parts = line.split()
+            for part in parts:
+                if part.startswith('Domain:'):
+                    domain = part.split(':')[1].strip(',')
+                    print(Fore.GREEN + f"Extracted domain: {domain}" + Style.RESET_ALL)
+                    with open('/etc/hosts', 'a') as hosts_file:
+                        hosts_file.write(f"{target_ip}\t{domain}\n")
+                    print(Fore.GREEN + f"Added {domain} to /etc/hosts with IP {target_ip}" + Style.RESET_ALL)
+                    return
+    print(Fore.RED + "No relevant domain information found for port 389." + Style.RESET_ALL)
+
 def main():
     try:
         # Check if help argument is provided
@@ -106,8 +122,6 @@ def main():
         print(Fore.GREEN + "\n\nOOoh, There are a few ports open \nGonnae copy these to NMAP for ye, for some intricate.... ;)  scanning...\n({})".format(Fore.MAGENTA + open_ports + Style.RESET_ALL) + Style.RESET_ALL)
 
         # Run Nmap
-
-  # Run Nmap
         nmap_output_file = os.path.join(save_location, "{}_nmap_results".format(The_Bad_Guy))
         nmap_command = ["nmap", "-p", open_ports, "-sC", "-sV", "-oA", nmap_output_file, The_Bad_Guy]
 
@@ -124,6 +138,9 @@ def main():
         print(nmap_output)
         print(Fore.GREEN + "I've saved your loot here:", nmap_output_file + Style.RESET_ALL)
 
+        # Check and update /etc/hosts if port 389 is open and contains domain info
+        add2Hosts(nmap_output, The_Bad_Guy)
+
     except KeyboardInterrupt:
         while True:
             confirmation = input(Fore.YELLOW + "\n\nAre you sure you want to exit? (k/n): " + Style.RESET_ALL)
@@ -139,5 +156,6 @@ def main():
             else:
                 print(Fore.RED + "\n\nInvalid input. Please enter 'y' or 'n'." + Style.RESET_ALL)
                 continue
+
 if __name__ == "__main__":
     main()
