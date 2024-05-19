@@ -16,7 +16,7 @@
 #       - If no location is selected then it will default to the pwd
 # python3 rs2nm.py <Target> <FS Location>
 
-# Code Version: 1.1
+# Code Version: 1.7
 #
 # Updates:
 # 12/05/2024: Initial Code Build
@@ -56,6 +56,7 @@ def print_help():
                 Who Doesn't Like Colours'
                 Added Help Bit just in case
     18/05/2024: Added Host Discovery Blocker Fix
+    19/05/2024: Added Automatic Domain Append to /etc/hosts
     """)
 
 def run_nmap(nmap_command):
@@ -68,15 +69,17 @@ def add2Hosts(nmap_output, target_ip):
     for line in nmap_output.split('\n'):
         if '389/tcp' in line and 'open' in line and 'Microsoft Windows Active Directory LDAP' in line:
             print(Fore.GREEN + "Looks like a Domain. Port 389 found with LDAP information: " + line + Style.RESET_ALL)
-            parts = line.split()
-            for part in parts:
-                if part.startswith('Domain:'):
-                    domain = part.split(':')[1].strip(',')
-                    print(Fore.GREEN + f"Extracted domain: {domain}" + Style.RESET_ALL)
-                    with open('/etc/hosts', 'a') as hosts_file:
-                        hosts_file.write(f"{target_ip}\t{domain}\n")
-                    print(Fore.GREEN + f"Added {domain} to /etc/hosts with IP {target_ip}" + Style.RESET_ALL)
-                    return
+            # Extract domain from the line
+            start_index = line.find('Domain:') + len('Domain:')
+            end_index = line.find(',', start_index)
+            if end_index == -1:
+                end_index = line.find(')', start_index)
+            domain = line[start_index:end_index].strip()
+            print(Fore.GREEN + f"Extracted domain: {domain}" + Style.RESET_ALL)
+            with open('/etc/hosts', 'a') as hosts_file:
+                hosts_file.write(f"{target_ip}\t{domain}\n")
+            print(Fore.GREEN + f"Added {domain} to /etc/hosts with IP {target_ip}" + Style.RESET_ALL)
+            return
     print(Fore.RED + "No relevant domain information found for port 389." + Style.RESET_ALL)
 
 def main():
