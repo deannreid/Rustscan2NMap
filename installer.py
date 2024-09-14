@@ -8,10 +8,23 @@ import json
 import random
 from colorama import Fore, Style, init
 import ctypes
+import argparse
+import re
+import requests
 
 init(autoreset=True)
 
-CONFIG_FILE = "dependency_config.json"
+CONFIG_FILE = os.path.expanduser("~/.rs2nm/config.json")
+DOWNLOAD_URL = "http://example.com/path/to/your/latest/rs2nm.py"  # Replace with actual URL
+TARGET_DIR = "/usr/bin"
+TARGET_FILE = "rs2nm.py"
+ALIAS_NAME = "rs2nm"
+ALIAS_COMMAND = f"python3 {os.path.join(TARGET_DIR, TARGET_FILE)}"
+
+def checkConfigDir():
+    config_dir = os.path.dirname(CONFIG_FILE)
+    if not os.path.exists(config_dir):
+        os.makedirs(config_dir)
 
 def is_admin():
     if platform.system().lower() == "windows":
@@ -32,8 +45,8 @@ def check_python_version():
         print_message("This script requires Python 3.10.0 or higher. Please upgrade your Python version.", "error")
         sys.exit(1)
 
-def run_command(command):
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def run_command(command, cwd=None):
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
     output, error = process.communicate()
     return output.decode().strip(), error.decode().strip()
 
@@ -43,34 +56,40 @@ def load_config():
             return json.load(file)
     return {
         "dependencies": {},
-        "disabled_features": []
+        "disabled_features": [],
+        "enable_bloodhound": True,
+        "enable_ldap_utils": True,
+        "enable_enum4linux_ng": True,
+        "enable_netexec": True,
+        "output_directory": os.path.expanduser("~/rs2nm_output")
     }
 
 def save_config(config):
+    checkConfigDir()
     with open(CONFIG_FILE, "w") as file:
         json.dump(config, file, indent=4)
 
-def install_dependency(tool):
+def install_dependency(tool, config):
     install_commands = {
         "Rustscan": {
-            "linux": ["cargo", "install", "rustscan"],
-            "windows": [sys.executable, "-m", "pip", "install", "rustscan"],
-            "darwin": ["cargo", "install", "rustscan"]
+            "linux": install_rustscan,
+            "windows": None,  # Not applicable
+            "darwin": None  # Not applicable
         },
         "Netexec": {
-            "linux": [sys.executable, "-m", "pip", "install", "netexec"],
-            "windows": [sys.executable, "-m", "pip", "install", "netexec"],
-            "darwin": [sys.executable, "-m", "pip", "install", "netexec"]
+            "linux": ["sudo", "apt-get", "install", "-y", "netexec"],
+            "windows": None,  # Not applicable
+            "darwin": None  # Not applicable
         },
         "Nmap": {
             "linux": ["sudo", "apt-get", "install", "-y", "nmap"],
-            "windows": ["choco", "install", "nmap"],
+            "windows": ["winget", "install", "-e", "--id", "Insecure.Nmap"],
             "darwin": ["brew", "install", "nmap"]
         },
         "enum4linux-ng": {
             "linux": ["sudo", "apt-get", "install", "-y", "enum4linux-ng"],
-            "windows": [sys.executable, "-m", "pip", "install", "enum4linux-ng"],
-            "darwin": ["brew", "install", "enum4linux-ng"]
+            "windows": None,  # Not applicable
+            "darwin": None  # Not applicable
         },
         "ldap-utils": {
             "linux": ["sudo", "apt-get", "install", "-y", "ldap-utils"],
@@ -78,9 +97,9 @@ def install_dependency(tool):
             "darwin": ["brew", "install", "ldap-utils"]
         },
         "BloodHound": {
-            "linux": ["sudo", "apt-get", "install", "-y", "bloodhound"],
-            "windows": ["choco", "install", "bloodhound"],
-            "darwin": ["brew", "install", "bloodhound"]
+            "linux": install_bloodhound,
+            "windows": None,  # Not applicable
+            "darwin": None  # Not applicable
         },
         "Python dependencies": {
             "linux": [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
@@ -90,17 +109,66 @@ def install_dependency(tool):
     }
 
     system = platform.system().lower()
-    if tool in install_commands and system in install_commands[tool]:
+    if tool in install_commands and install_commands[tool][system]:
         print_message(f"Installing {tool}...", "info")
         command = install_commands[tool][system]
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        for line in process.stdout:
-            print(Fore.GREEN + line.decode().strip() + Style.RESET_ALL)
-        process.wait()
-        if process.returncode != 0:
-            print_message(f"Error installing {tool}", "error")
-            sys.exit(1)
+        if callable(command):
+            command()
+        else:
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            for line in process.stdout:
+                print(Fore.GREEN + line.decode().strip() + Style.RESET_ALL)
+            process.wait()
+            if process.returncode != 0:
+                print_message(f"Error installing {tool}", "error")
+                sys.exit(1)
         print_message(f"{tool} installed successfully.", "success")
+
+def install_rustscan():
+    print_message("Installing Rustscan...", "info")
+    release_url = get_latest_rustscan_release()
+    if not release_url:
+        print_message("Could not find the latest Rustscan release.", "error")
+        sys.exit(1)
+
+    deb_file = release_url.split('/')[-1]
+    command = ["wget", "-O", deb_file, release_url]
+    output, error = run_command(command)
+    if error:
+        print_message(f"Error downloading Rustscan: {error}", "error")
+        sys.exit(1)
+
+    command = ["sudo", "dpkg", "-i", deb_file]
+    output, error = run_command(command)
+    if error:
+        print_message(f"Error installing Rustscan: {error}", "error")
+        sys.exit(1)
+
+    print_message("Rustscan installed successfully.", "success")
+
+def get_latest_rustscan_release():
+    print_message("Fetching the latest Rustscan release...", "info")
+    releases_url = "https://github.com/RustScan/RustScan/releases"
+    response = requests.get(releases_url)
+    if response.status_code != 200:
+        return None
+
+    match = re.search(r'/RustScan/RustScan/releases/download/(\d+\.\d+\.\d+)/rustscan_\d+\.\d+\.\d+_amd64\.deb', response.text)
+    if match:
+        return f"https://github.com{match.group(0)}"
+    return None
+
+def install_bloodhound():
+    print_message("Installing BloodHound...", "info")
+    command = ["curl", "-L", "https://ghst.ly/getbhce", "|", "docker", "compose", "-f", "-", "up"]
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+    for line in process.stdout:
+        print(Fore.GREEN + line.decode().strip() + Style.RESET_ALL)
+    process.wait()
+    if process.returncode != 0:
+        print_message("Error installing BloodHound", "error")
+        sys.exit(1)
+    print_message("BloodHound installed successfully.", "success")
 
 def check_dependencies(config):
     print_message("Checking Dependencies", "info")
@@ -114,6 +182,15 @@ def check_dependencies(config):
         "BloodHound": "bloodhound",
         "Python dependencies": "pip"
     }
+
+    if not config.get("enable_bloodhound", True):
+        config["disabled_features"].append("BloodHound")
+    if not config.get("enable_ldap_utils", True):
+        config["disabled_features"].append("ldap-utils")
+    if not config.get("enable_enum4linux_ng", True):
+        config["disabled_features"].append("enum4linux-ng")
+    if not config.get("enable_netexec", True):
+        config["disabled_features"].append("Netexec")
 
     system = platform.system().lower()
     which_command = "which" if system != "windows" else "where"
@@ -131,7 +208,7 @@ def check_dependencies(config):
             while True:
                 choice = input(Fore.YELLOW + f"Do you want to install {tool}? (y/n): " + Style.RESET_ALL)
                 if choice.lower() == 'y':
-                    install_dependency(tool)
+                    install_dependency(tool, config)
                     config["dependencies"][tool] = "installed"
                     break
                 elif choice.lower() == 'n':
@@ -147,54 +224,5 @@ def check_dependencies(config):
 
     save_config(config)
 
-def print_message(message, msg_type):
-    symbols = {
-        "info": Fore.CYAN + "{~} ",
-        "warning": Fore.RED + "{!} ",
-        "success": Fore.GREEN + "{✓} ",
-        "error": Fore.RED + "{!} ",
-        "disabled": Fore.LIGHTBLACK_EX + "{X} "
-    }
-    print(symbols.get(msg_type, "") + message + Style.RESET_ALL)
-
-def print_ascii_banner():
-    print(Fore.CYAN + """
-_|_|_|      _|_|_|        _|_|        _|      _|  _|      _|
-_|    _|  _|            _|    _|      _|_|    _|  _|_|  _|_|
-_|_|_|      _|_|            _|        _|  _|  _|  _|  _|  _|
-_|    _|        _|        _|          _|    _|_|  _|      _|
-_|    _|  _|_|_|        _|_|_|_|      _|      _|  _|      _|
-
-The soon to be all in one pentest enumeration tool.
-
-------------------------------------------------
-::        %INSERT RELEVANT DISCORD HERE       ::
-:: https://github.com/deannreid/Rustscan2NMap ::
------------------------------------------------- """ + Style.RESET_ALL)
-
-def print_blurb():
-    blurbs = [
-        "Enumerating services: Like snooping through your neighbor's Wi-Fi, but legal.\n",
-        "Exploring services: The geek's way of saying 'I'm just curious!'\n",
-        "Discovering endpoints: Like a treasure hunt, but with more IP addresses.\n",
-        "Probing the depths: Finding the juicy bits your network's been hiding.\n"
-    ]
-    print(random.choice(blurbs))
-
-if __name__ == "__main__":
-    print_ascii_banner()
-    print_blurb()
-
-    check_python_version()
-
-    if not is_admin():
-        print_message("This script requires administrative privileges. Please run it as an administrator or with sudo.", "error")
-        sys.exit(1)
-
-    system = platform.system().lower()
-    print_message(f"Operating System Detected: {platform.system()}", "info")
-    print_message(f"Configuration file located at: {os.path.abspath(CONFIG_FILE)}", "info")
-
-    config = load_config()
-    check_dependencies(config)
-    save_config(config)
+def download_and_install_rs2nm():
+    print_message("Downloading the latest version of rs2nm.py...", "

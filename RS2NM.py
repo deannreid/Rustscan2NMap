@@ -302,9 +302,36 @@ def add_to_hosts(target_ip, domain):
     hosts_path = r'C:\Windows\System32\drivers\etc\hosts' if os.name == 'nt' else '/etc/hosts'
 
     try:
-        with open(hosts_path, 'a') as hosts_file:
-            hosts_file.write(f"{target_ip}\t{domain}\n")
+        # Read the existing hosts file content
+        with open(hosts_path, 'r') as hosts_file:
+            hosts_lines = hosts_file.readlines()
+
+        ip_found = False
+        for i, line in enumerate(hosts_lines):
+            # Strip leading/trailing spaces and split by whitespace
+            parts = line.strip().split()
+
+            # Check if the line starts with the target IP
+            if len(parts) > 0 and parts[0] == target_ip:
+                current_ip = parts[0]
+                current_domains = parts[1:]  # Everything after the IP are domains
+
+                # Append the domain if it's not already present
+                if domain not in current_domains:
+                    hosts_lines[i] = f"{current_ip} {' '.join(current_domains)} {domain}\n"
+                ip_found = True
+                break
+
+        # If the IP was not found, add a new entry
+        if not ip_found:
+            hosts_lines.append(f"{domain}\n")
+
+        # Write the modified content back to the hosts file
+        with open(hosts_path, 'w') as hosts_file:
+            hosts_file.writelines(hosts_lines)
+
         print_message(f"Added {domain} to hosts file with IP {target_ip}", "success")
+
     except PermissionError:
         print_message("Permission denied: Unable to write to the hosts file. Please run the script as an administrator or with sudo.", "error")
     except Exception as e:
@@ -463,13 +490,13 @@ if __name__ == "__main__":
     print_ascii_banner()
     print_blurb()
 
+    system = platform.system().lower()
+    print_message(f"Operating System Detected: {platform.system()}", "info")
+
     check_python_version()
 
     if not is_admin():
         print_message("This script requires administrative privileges. Please run it as an administrator or with sudo.", "error")
         sys.exit(1)
-
-    system = platform.system().lower()
-    print_message(f"Operating System Detected: {platform.system()}", "info")
 
     main()
