@@ -18,6 +18,6 @@ Introducing a handy automation script designed to streamline your workflow. This
   - Target
   - File Save Location
       - If no location selected then it will default to the pwd
-### python3 rs2nm.py 0.0.0.0 C:\Nudes
+### python3 rs2nm.py 0.0.0.0 C:\Loot
 
 
