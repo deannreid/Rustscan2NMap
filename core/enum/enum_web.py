@@ -1,16 +1,16 @@
 import os
-import socket
+import tempfile
 import subprocess
 import urllib.request
 import platform
-import shutil
-
+import socket 
 from config import DOM_LIST
 from core.utils import fncPrintMessage
 from core.handlers import fncAddToHosts, fncEnsureInstalled
 
 # Detect Windows for new console spawning
 IS_WINDOWS = platform.system().lower() == "windows"
+CREATE_NEW_CONSOLE = 0x00000010 if IS_WINDOWS else 0
 
 
 def fncGetWebPort(target):
@@ -51,35 +51,49 @@ def fncFuzzDirectories(target, save_location, base_url):
     """
     if not fncEnsureInstalled("ffuf", "e.g., apt install ffuf"):
         return
-
+    
     print("\n===================================")
     fncPrintMessage(f"Directory fuzz → {base_url}/FUZZ", "info")
-    output_file = os.path.join(save_location, f"{target}_dirs.json")
-
     if input("Custom wordlist? (y/n): ").strip().lower() == 'y':
         wordlist = input("Path to wordlist: ").strip()
     else:
         wordlist = DOM_LIST
-
     if not os.path.isfile(wordlist):
         fncPrintMessage(f"Wordlist not found: {wordlist}", "error")
         return
 
-    cmd = (
-        f'ffuf -u "{base_url}/FUZZ" '
-        f'-w "{wordlist}:FUZZ" '
-        f'-o "{output_file}" '
-        f'-t 500 -fc 403 -ac'
-    )
+    # save wrapper under ~/.rs2nm/wrappers/{target}/
+    wrapper_dir = os.path.expanduser(f"~/.rs2nm/wrappers/{target}")
+    os.makedirs(wrapper_dir, exist_ok=True)
+    wrapper = os.path.join(wrapper_dir, "ffuf_dirs_wrapper.py")
 
-    try:
-        if IS_WINDOWS:
-            subprocess.Popen(f'start cmd /k "{cmd} & pause"', shell=True, cwd=save_location)
-        else:
-            subprocess.Popen(cmd, shell=True, cwd=save_location)
-        fncPrintMessage(f"Directory fuzz launched. Results → {output_file}", "success")
-    except Exception as e:
-        fncPrintMessage(f"Failed directory fuzz: {e}", "error")
+    with open(wrapper, "w", encoding="utf-8") as w:
+        w.write(f'''import sys, subprocess, os, signal
+print("FFUF directory fuzz is running in silent mode...")
+args = sys.argv
+if len(args) < 5: sys.exit(1)
+target, save_location, base_url, wordlist = args[1:5]
+output = os.path.join(save_location, f"{{target}}_dirs.json")
+cmd = ["ffuf", "-s",
+    "-u", f"{{base_url}}/FUZZ",
+    "-w", f"{{wordlist}}:FUZZ",
+    "-of", "json", "-t", "500", "-fc", "403", "-ac", "-v"
+]
+lines = []
+proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+signal.signal(signal.SIGINT, lambda s,f: proc.terminate())
+for line in proc.stdout:
+    print(line, end=""); lines.append(line)
+proc.wait()
+with open(output, "w", encoding="utf-8") as f:
+    f.writelines(lines)
+''')
+
+    args = ["python", wrapper, target, save_location, base_url, wordlist]
+    if IS_WINDOWS:
+        subprocess.Popen(args, creationflags=CREATE_NEW_CONSOLE)
+    else:
+        subprocess.Popen(["python3", wrapper, target, save_location, base_url, wordlist], cwd=save_location)
 
 
 def fncFuzzSubdomains(target, save_location, base_url):
@@ -88,62 +102,63 @@ def fncFuzzSubdomains(target, save_location, base_url):
     """
     if not fncEnsureInstalled("ffuf", "e.g., apt install ffuf"):
         return
-
+    
     print("\n===================================")
-    fncPrintMessage(f"Subdomain fuzz → FUZZ.{target}", "info")
-    output_file = os.path.join(save_location, f"{target}_subs.json")
-
-    sizes = ["huge", "large", "medium", "small", "tiny"]
+    fncPrintMessage(f"Subdomain fuzz → {base_url}", "info")
+    sizes = ["huge","large","medium","small","tiny"]
     print("Select Nokovo list size:")
     for i, sz in enumerate(sizes, 1):
         print(f"  {i}. n0kovo_subdomains_{sz}.txt")
-    print(f"  {len(sizes)+1}. Provide custom wordlist")
+    print(f"  {len(sizes)+1}. Custom path")
     choice = input(f"[1-{len(sizes)+1}]: ").strip()
-    try:
-        idx = int(choice)
-    except ValueError:
-        idx = 1
-
+    idx = int(choice) if choice.isdigit() else 1
     if 1 <= idx <= len(sizes):
         sz = sizes[idx-1]
         wordlist = os.path.expanduser(f"~/.rs2nm/nokovo_subdomains_{sz}.txt")
         if not os.path.isfile(wordlist):
-            fncPrintMessage(f"Downloading Nokovo ({sz})…", "info")
             os.makedirs(os.path.dirname(wordlist), exist_ok=True)
-            url = (
-                "https://raw.githubusercontent.com/"
-                "n0kovo/n0kovo_subdomains/refs/heads/main/"
-                f"n0kovo_subdomains_{sz}.txt"
-            )
-            try:
-                urllib.request.urlretrieve(url, wordlist)
-                fncPrintMessage(f"Saved → {wordlist}", "success")
-            except Exception as e:
-                fncPrintMessage(f"Download failed: {e}", "error")
-                wordlist = ""
+            urllib.request.urlretrieve(
+                "https://raw.githubusercontent.com/n0kovo/n0kovo_subdomains/refs/heads/main/"
+                f"n0kovo_subdomains_{sz}.txt", wordlist)
     else:
         wordlist = input("Custom wordlist path: ").strip()
-
     if not os.path.isfile(wordlist):
         fncPrintMessage(f"Wordlist not found: {wordlist}", "error")
         return
 
-    cmd = (
-        f'ffuf -w "{wordlist}:FUZZ" '
-        f'-u "{base_url}/" '
-        f'-H "Host: FUZZ.{target}" '
-        f'-t 500 -fc 403 -ac '
-        f'-o "{output_file}"'
-    )
+    # save wrapper under ~/.rs2nm/wrappers/{target}/
+    wrapper_dir = os.path.expanduser(f"~/.rs2nm/wrappers/{target}")
+    os.makedirs(wrapper_dir, exist_ok=True)
+    wrapper = os.path.join(wrapper_dir, "ffuf_subs_wrapper.py")
 
-    try:
-        if IS_WINDOWS:
-            subprocess.Popen(f'start cmd /k "{cmd} & pause"', shell=True, cwd=save_location)
-        else:
-            subprocess.Popen(cmd, shell=True, cwd=save_location)
-        fncPrintMessage(f"Subdomain fuzz launched. Results → {output_file}", "success")
-    except Exception as e:
-        fncPrintMessage(f"Failed subdomain fuzz: {e}", "error")
+    with open(wrapper, "w", encoding="utf-8") as w:
+        w.write(f'''import sys, subprocess, os, signal
+print("FFUF subdomain fuzz is running in silent mode...")
+args = sys.argv
+if len(args) < 5: sys.exit(1)
+target, save_location, base_url, wordlist = args[1:5]
+output = os.path.join(save_location, f"{{target}}_subs.json")
+cmd = ["ffuf", "-s",
+    "-w", f"{{wordlist}}:FUZZ",
+    "-u", f"{{base_url}}/",
+    "-H", f"Host: FUZZ.{{target}}",
+    "-of", "json", "-t", "500", "-fc", "403", "-ac", "-v"
+]
+lines = []
+proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+signal.signal(signal.SIGINT, lambda s,f: proc.terminate())
+for line in proc.stdout:
+    print(line, end=""); lines.append(line)
+proc.wait()
+with open(output, "w", encoding="utf-8") as f:
+    f.writelines(lines)
+''')
+
+    args = ["python", wrapper, target, save_location, base_url, wordlist]
+    if IS_WINDOWS:
+        subprocess.Popen(args, creationflags=CREATE_NEW_CONSOLE)
+    else:
+        subprocess.Popen(["python3", wrapper, target, save_location, base_url, wordlist], cwd=save_location)
 
 
 def fncScanRobotsTxt(target, save_location, base_url):
@@ -153,7 +168,8 @@ def fncScanRobotsTxt(target, save_location, base_url):
     """
     if not fncEnsureInstalled("curl", "e.g., apt install curl"):
         return
-
+    
+    print("\n===================================")
     fncPrintMessage("Fetching robots.txt…", "info")
     url = f"{base_url}/robots.txt"
     output = os.path.join(save_location, f"{target}_robots.txt")
@@ -185,7 +201,8 @@ def fncScanSitemapXml(target, save_location, base_url):
     """
     if not fncEnsureInstalled("curl", "e.g., apt install curl"):
         return
-
+    
+    print("\n===================================")
     fncPrintMessage("Fetching sitemap.xml…", "info")
     url = f"{base_url}/sitemap.xml"
     output = os.path.join(save_location, f"{target}_sitemap.xml")
@@ -217,7 +234,8 @@ def fncScanHeaders(target, save_location, base_url):
     """
     if not fncEnsureInstalled("curl", "e.g., apt install curl"):
         return
-
+    
+    print("\n===================================")
     fncPrintMessage("Gathering HTTP headers…", "info")
     output = os.path.join(save_location, f"{target}_headers.txt")
 
@@ -246,7 +264,8 @@ def fncScanWafW00f(target, save_location, base_url):
     """
     if not fncEnsureInstalled("wafw00f", "pip install wafw00f"):
         return
-
+    
+    print("\n===================================")
     fncPrintMessage("Running WAF detection…", "info")
     output = os.path.join(save_location, f"{target}_wafw00f.txt")
     try:
@@ -265,6 +284,7 @@ def fncScanParams(target, save_location, base_url):
     if not fncEnsureInstalled("paramspider", "pip install paramspider"):
         return
 
+    print("\n===================================")
     fncPrintMessage("Running ParamSpider…", "info")
     output = os.path.join(save_location, f"{target}_params.txt")
     try:
@@ -281,6 +301,8 @@ def fncScanCMSmap(target, save_location):
     """
     if not fncEnsureInstalled("cmsmap", "pip install cmsmap"):
         return
+    
+    print("\n===================================")
     fncPrintMessage("Running CMSmap…", "info")
     output = os.path.join(save_location, f"{target}_cmsmap.txt")
     cmd = ["cmsmap", target, "--deep","-o", output]
@@ -370,13 +392,13 @@ def fncRunWebFuzz(target, save_location):
 
     fncPrintMessage(f"Using base URL: {base_url}", "info")
 
-    #fncFuzzDirectories(target, save_location, base_url)
-    #fncFuzzSubdomains(target, save_location, base_url)
-    #fncScanRobotsTxt(target, save_location, base_url)
-    #fncScanSitemapXml(target, save_location, base_url)
-    #fncScanHeaders(target, save_location, base_url)
-    #fncScanWafW00f(target, save_location, base_url)
-    #fncScanParams(target, save_location, base_url)
+    fncFuzzDirectories(target, save_location, base_url)
+    fncFuzzSubdomains(target, save_location, base_url)
+    fncScanRobotsTxt(target, save_location, base_url)
+    fncScanSitemapXml(target, save_location, base_url)
+    fncScanHeaders(target, save_location, base_url)
+    fncScanWafW00f(target, save_location, base_url)
+    fncScanParams(target, save_location, base_url)
     fncScanCORS(target, save_location, base_url)
     fncScanCMSmap(target, save_location)
     fncScanSwagger(target, save_location, base_url)
