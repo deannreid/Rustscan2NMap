@@ -64,4 +64,4 @@ HOSTS_FILE = r'C:\Windows\System32\drivers\etc\hosts' if os.name == 'nt' else '/
 ## Wordlists
 SUB_DOM_LIST = ""
 
-DOM_LIST = "directory-list-1.0.txt"
+DOM_LIST = "/usr/share/dirbuster/directory-list-1.0.txt"

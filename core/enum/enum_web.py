@@ -12,7 +12,6 @@ from core.handlers import fncAddToHosts, fncEnsureInstalled
 IS_WINDOWS = platform.system().lower() == "windows"
 CREATE_NEW_CONSOLE = 0x00000010 if IS_WINDOWS else 0
 
-
 def fncGetWebPort(target):
     """
     Check ports 80 and 443; return one to use (as string).
@@ -34,7 +33,6 @@ def fncGetWebPort(target):
         return choice if choice in ("80", "443") else "80"
     return input("Neither 80 nor 443 open—enter port to use: ").strip()
 
-
 def fncEnsureHostEntry(target):
     """
     Ask if the domain is in hosts; if not, prompt for IP and add it.
@@ -43,7 +41,6 @@ def fncEnsureHostEntry(target):
     if ans != 'y':
         ip = input(f"Enter the IP address for '{target}': ").strip()
         fncAddToHosts(ip, target)
-
 
 def fncFuzzDirectories(target, save_location, base_url):
     """
@@ -94,7 +91,6 @@ with open(output, "w", encoding="utf-8") as f:
         subprocess.Popen(args, creationflags=CREATE_NEW_CONSOLE)
     else:
         subprocess.Popen(["python3", wrapper, target, save_location, base_url, wordlist], cwd=save_location)
-
 
 def fncFuzzSubdomains(target, save_location, base_url):
     """
@@ -160,7 +156,6 @@ with open(output, "w", encoding="utf-8") as f:
     else:
         subprocess.Popen(["python3", wrapper, target, save_location, base_url, wordlist], cwd=save_location)
 
-
 def fncScanRobotsTxt(target, save_location, base_url):
     """
     Fetch and save robots.txt. 
@@ -192,7 +187,6 @@ def fncScanRobotsTxt(target, save_location, base_url):
         fncPrintMessage(f"robots.txt not found on {target}", "warning")
     except Exception as e:
         fncPrintMessage(f"robots.txt fetch error: {e}", "error")
-
 
 def fncScanSitemapXml(target, save_location, base_url):
     """
@@ -257,7 +251,6 @@ def fncScanHeaders(target, save_location, base_url):
     except Exception as e:
         fncPrintMessage(f"Header scan error: {e}", "error")
 
-
 def fncScanWafW00f(target, save_location, base_url):
     """
     Fingerprint WAF with wafw00f.
@@ -275,7 +268,6 @@ def fncScanWafW00f(target, save_location, base_url):
         fncPrintMessage(f"WAF scan saved → {output}", "success")
     except Exception as e:
         fncPrintMessage(f"WAF detection failed: {e}", "error")
-
 
 def fncScanParams(target, save_location, base_url):
     """
@@ -350,7 +342,6 @@ def fncScanCORS(target, save_location, base_url):
     except Exception as e:
         fncPrintMessage(f"CORS scan error: {e}", "error")
 
-
 def fncScanSwagger(target, save_location, base_url):
     """
     Fetch Swagger/OpenAPI spec if exposed.
@@ -369,7 +360,6 @@ def fncScanSwagger(target, save_location, base_url):
         except Exception:
             pass
     fncPrintMessage("No Swagger/OpenAPI spec found", "warning")
-
 
 def fncRunWebFuzz(target, save_location):
     """

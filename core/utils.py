@@ -15,7 +15,6 @@ def fncPrintMessage(message, msg_type="info"):
     prefix = symbols.get(msg_type, "")
     print(prefix + message + Style.RESET_ALL)
 
-
 def fncIsAdmin():
     system = platform.system().lower()
     if system == "windows":
@@ -26,7 +25,6 @@ def fncIsAdmin():
             sys.exit(1)
     else:
         return os.geteuid() == 0
-
 
 def fncCheckPythonVersion():
     python_version = sys.version_info

@@ -3,7 +3,6 @@ import os
 import json
 from core.utils import fncPrintMessage
 
-
 def fncRunRustscan(target):
     fncPrintMessage(f"Target: {target}", "success")
     fncPrintMessage("Checking for existing scan results...", "info")

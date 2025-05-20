@@ -17,7 +17,6 @@ def fncRunNetExecSMB(target_ip, save_location):
     else:
         fncPrintMessage(f"Netexec SMB results saved: {output_file}", "success")
 
-
 def fncRunEnum4LinuxNG(target_ip, save_location):
     fncPrintMessage("Running enum4linux-ng", "info")
     output_file = os.path.join(save_location, f"{target_ip}_enum4linux_ng_results.txt")
@@ -33,7 +32,6 @@ def fncRunEnum4LinuxNG(target_ip, save_location):
     else:
         fncPrintMessage(f"enum4linux-ng results saved: {output_file}", "success")
 
-
 def fncRunLdapSearch(target_ip, save_location):
     fncPrintMessage("Running ldapsearch", "info")
     output_file = os.path.join(save_location, f"{target_ip}_ldapsearch_results.txt")
@@ -48,7 +46,6 @@ def fncRunLdapSearch(target_ip, save_location):
         fncPrintMessage("ldapsearch error:\n" + err.decode(), "error")
     else:
         fncPrintMessage(f"ldapsearch results saved: {output_file}", "success")
-
 
 def fncRunBloodhound(target_hostname, save_location, domain, username, password):
     fncPrintMessage("Running BloodHound (via bloodhound-python)", "info")
