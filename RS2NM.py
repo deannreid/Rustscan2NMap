@@ -2,6 +2,7 @@
 import argparse
 import os
 import sys
+from os.path import expanduser, join
 import json
 import random
 from colorama import Fore, Style
@@ -76,30 +77,53 @@ def main():
             return
 
         # --- 2) Nmap (with simple resume logic) ---
-        state_dir  = os.path.expanduser("~/.rs2nm/temp")
+        state_dir  = expanduser("~/.rs2nm/temp")
         os.makedirs(state_dir, exist_ok=True)
-        state_file = os.path.join(state_dir, f"rs2nm_{target}.json")
+        state_file = join(state_dir, f"rs2nm_{target}.json")
 
-        rerun_nmap = True
-        if os.path.exists(state_file):
-            with open(state_file) as sf:
-                st = json.load(sf)
-            if st.get("nmap_complete"):
-                ans = input("Nmap already done. Re-run? (y/n): ").strip().lower()
-                rerun_nmap = (ans == 'y')
+        # Load or initialize state
+        try:
+            with open(state_file, "r", encoding="utf-8") as sf:
+                state = json.load(sf)
+        except (FileNotFoundError, json.JSONDecodeError):
+            state = {}
+
+        prev_ports     = state.get("ports")
+        prev_nmap_done = state.get("nmap_complete", False)
+
+        # Compare ports
+        if prev_ports == open_ports and prev_nmap_done:
+            ans = input("Skip Nmap? (y/n): ").strip().lower()
+            rerun_nmap = (ans == 'y') is False
+        else:
+            # Ports changed or first run
+            rerun_nmap = True
+            # Store new ports and reset flag
+            state["ports"]         = open_ports
+            state["nmap_complete"] = False
+            with open(state_file, "w", encoding="utf-8") as sf:
+                json.dump(state, sf, indent=2)
 
         nmap_base = os.path.join(save_location, f"{target}_nmap_results")
         if rerun_nmap:
-            nmap_out, nmap_err = fncRunNmap(target, open_ports, nmap_base)
-            if nmap_err:
-                fncPrintMessage(f"Nmap error: {nmap_err}", "error")
-            print(nmap_out)
+            # Run Nmap and store both stdout and stderr
+            nmap_output, nmap_error = fncRunNmap(target, open_ports, nmap_base)
+            if nmap_error:
+                fncPrintMessage(f"Nmap error: {nmap_error}", "error")
+            print(nmap_output)
             fncPrintMessage(f"Nmap saved → {nmap_base}.nmap/.xml/.gnmap", "success")
-            # mark complete
-            with open(state_file, "w") as sf:
-                json.dump({"nmap_complete": True}, sf)
-            nmap_output = nmap_out
+
+            # mark complete in JSON state file (preserving ip/ports)
+            try:
+                with open(state_file, "r", encoding="utf-8") as sf:
+                    data = json.load(sf)
+            except (FileNotFoundError, json.JSONDecodeError):
+                data = {}
+            data["nmap_complete"] = True
+            with open(state_file, "w", encoding="utf-8") as sf:
+                json.dump(data, sf, indent=2)
         else:
+            # If we skip rerun, ensure nmap_output still exists
             nmap_output = ""
 
         # --- 3) Post‐Nmap processing ---
