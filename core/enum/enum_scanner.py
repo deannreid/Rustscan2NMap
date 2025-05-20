@@ -1,8 +1,7 @@
 import subprocess
 import os
 import json
-import tempfile
-from .utils import fncPrintMessage
+from core.utils import fncPrintMessage
 
 
 def fncRunRustscan(target):
@@ -75,27 +74,39 @@ def fncRunRustscan(target):
     fncPrintMessage("No open ports found by Rustscan.", "info")
     return ""
 
-def fncRunNmap(target, ports, output_file):
+def fncRunNmap(target: str, ports: str, output_file: str):
+    """
+    Run Nmap against <target> on <ports>, save with -oA <output_file>,
+    and retry with -Pn if host seems down.
+    Returns (stdout, stderr) decoded as strings.
+    """
     fncPrintMessage("Running Nmap", "info")
-    fncPrintMessage("This can take a few moments depending on how many ports are available\n", "info")
+    fncPrintMessage(
+        "This can take a few moments depending on how many ports are available",
+        "info"
+    )
 
     command = ["nmap", "-p", ports, "-sC", "-sV", "-oA", output_file, target]
-    output, error = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
-    decoded_output = output.decode()
+    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = proc.communicate()
+    decoded = out.decode()
 
-    if "Note: Host seems down." in decoded_output:
+    if "Note: Host seems down." in decoded:
         fncPrintMessage("Host seems down. Retrying with -Pn", "warning")
         command.insert(1, "-Pn")
-        output, error = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, err = proc.communicate()
 
-    return output.decode(), error.decode()
+    return out.decode(), err.decode()
 
-
-def fncDetectOSFromNmap(nmap_output):
+def fncDetectOSFromNmap(nmap_output: str) -> str:
+    """
+    Look for common OS strings in Nmap output to return 'windows', 'linux', 'unix', or 'unknown'.
+    """
     if "Windows" in nmap_output:
         return "windows"
-    elif "Linux" in nmap_output:
+    if "Linux" in nmap_output:
         return "linux"
-    elif "Unix" in nmap_output:
+    if "Unix" in nmap_output or "BSD" in nmap_output:
         return "unix"
     return "unknown"
