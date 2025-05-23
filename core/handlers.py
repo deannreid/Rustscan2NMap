@@ -1,11 +1,22 @@
 import os
 import json
+import sys
 import re
+import subprocess
 import shutil
 import ipaddress
+import pwd
 
 from .utils import fncPrintMessage
 from config import CONFIG_PATH, HOSTS_FILE, LDAP_PORTS
+
+HOSTS_FILE = (
+    r'C:\Windows\System32\drivers\etc\hosts'
+    if os.name == 'nt'
+    else '/etc/hosts'
+)
+
+STATE_DIR = os.path.expanduser("~/.rs2nm/temp")
 
 def fncEnsureInstalled(tool_name, install_hint=None):
     """
@@ -25,6 +36,71 @@ def fncEnsureInstalled(tool_name, install_hint=None):
             fncPrintMessage(f"Please install {tool_name} and re-run when ready.", "warning")
             return False
     return True
+
+def fncLaunchInNewTerminal(script_path: str, args: list[str]):
+    """
+    On Linux under X11 (including sudo), tries gnome-terminal, konsole, xfce4-terminal,
+    xterm or lxterminal with their “hold open” flags so the window stays after exit.
+    If no DISPLAY or no emulator found, backgrounds the job.
+    """
+    import os
+    import sys
+    import subprocess
+    import shutil
+    import pwd
+    import shlex
+
+    python_cmd = [sys.executable, script_path] + args
+
+    # If there's no X display, background it immediately
+    display = os.environ.get("DISPLAY")
+    if not display:
+        subprocess.Popen(
+            python_cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        return
+
+    # Preserve XAUTHORITY & run as non-root if under sudo
+    env = os.environ.copy()
+    env["DISPLAY"] = display
+    launcher_prefix = []
+    if os.geteuid() == 0 and env.get("SUDO_USER"):
+        try:
+            pw = pwd.getpwnam(env["SUDO_USER"])
+            env["XAUTHORITY"] = os.path.join(pw.pw_dir, ".Xauthority")
+            launcher_prefix = ["sudo", "-u", env["SUDO_USER"]]
+        except KeyError:
+            pass
+
+    # Terminals with hold-open support
+    terminals = [
+        ("gnome-terminal",   ["--", "bash", "-c", f"{shlex.join(python_cmd)}; echo; read -p 'Press Enter to exit…';"]),
+        ("konsole",          ["--hold", "-e", *python_cmd]),
+        ("xfce4-terminal",   ["--hold", "--command", shlex.join(python_cmd)]),
+        ("xterm",            ["-hold", "-e", shlex.join(python_cmd)]),
+        ("lxterminal",       ["--hold", "-e", *python_cmd]),
+    ]
+
+    for term, term_args in terminals:
+        path = shutil.which(term)
+        if path:
+            subprocess.Popen(
+                [*launcher_prefix, term, *term_args],
+                env=env
+            )
+            return
+
+    # Fallback: no GUI terminal found
+    subprocess.Popen(
+        python_cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        env=env
+    )
 
 def fncCheckConfigFileExists():
     if os.path.exists(CONFIG_PATH):
@@ -134,6 +210,68 @@ def fncAddToHosts(target_input, domains):
     except Exception as e:
         fncPrintMessage(f"Error writing to hosts file: {e}", "error")
 
+def fncEnsureHostEntry(target: str) -> str:
+    """
+    If target is an IP, look up hosts file for matching hostnames.
+    - If one found -> use that hostname.
+    - If multiple -> prompt user to choose.
+    - If none -> ask to add one, or continue using IP.
+    Returns the hostname (or original target) to use in subsequent scans.
+    """
+    # only act on IPs
+    try:
+        ipaddress.ip_address(target)
+    except ValueError:
+        return target  # already a hostname
+
+    # read hosts file
+    try:
+        with open(HOSTS_FILE, 'r', encoding='utf-8', errors='ignore') as hf:
+            lines = hf.readlines()
+    except Exception:
+        return target
+
+    # collect all hostnames for this IP
+    domains = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        parts = re.split(r'\s+', line)
+        if parts[0] == target and len(parts) > 1:
+            domains.extend(parts[1:])
+    domains = sorted(set(domains))
+
+    # one match -> return it
+    if len(domains) == 1:
+        return domains[0]
+
+    # multiple -> prompt
+    if len(domains) > 1:
+        print(f"Multiple hostnames found for {target}:")
+        for i, d in enumerate(domains, 1):
+            print(f"  {i}) {d}")
+        while True:
+            choice = input(f"Select hostname [1-{len(domains)}] or 'n' to keep IP: ").strip().lower()
+            if choice == 'n':
+                return target
+            if choice.isdigit():
+                idx = int(choice)
+                if 1 <= idx <= len(domains):
+                    return domains[idx-1]
+            print("Invalid selection, try again.")
+
+    # none found -> offer to add
+    print(f"No hosts entry found for {target}.")
+    if input("Add a new mapping? (y/n): ").strip().lower() == 'y':
+        domain = input("Enter hostname to map this IP to: ").strip()
+        # delegate to your existing add-to-hosts function
+        from .handlers import fncAddToHosts
+        fncAddToHosts(target, domain)
+        return domain
+
+    return target
+
 def fncGetDomainsFromNmap(nmap_output):
     fncPrintMessage("Checking for domain information", "info")
     domains = set()
@@ -167,3 +305,24 @@ def fncGetDomainsFromNmap(nmap_output):
 def fncSmbPortsOpen(open_ports):
     from config import SMB_PORTS
     return any(port in SMB_PORTS for port in open_ports.split(','))
+
+def fncLoadScanState(target: str):
+    """
+    Ensure the ~/.rs2nm/temp folder exists and load (or init) the JSON state for this target.
+    Returns (state_file_path, state_dict).
+    """
+    os.makedirs(STATE_DIR, exist_ok=True)
+    path = os.path.join(STATE_DIR, f"rs2nm_{target}.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        state = {}
+    return path, state
+
+def fncSaveScanState(path: str, state: dict):
+    """
+    Atomically write the JSON state back out.
+    """
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)

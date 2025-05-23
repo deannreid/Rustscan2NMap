@@ -15,15 +15,19 @@ from core.handlers import (
     fncCheckConfigFileExists,
     fncAddToHosts,
     fncGetDomainsFromNmap,
-    fncSmbPortsOpen
+    fncSmbPortsOpen,
+    fncLoadScanState,
+    fncSaveScanState
 )
 from core.pretty_stuff import (
     fncPrintAsciiBanner,
     fncPrintBlurb,
     fncPrintVersion
 )
+
 from core.enum.enum_web import fncRunWebFuzz
 from core.enum.enum_sql import fncRunSQLEnum
+from core.enum.enum_linux import fncRunLinuxEnum
 
 def main():
     try:
@@ -32,9 +36,6 @@ def main():
             fncPrintMessage("Administrator privileges required.", "error")
             sys.exit(1)
 
-        fncCheckPythonVersion()
-        fncCheckConfigFileExists()
-
         parser = argparse.ArgumentParser(description="RustScan 2 NMap")
         parser.add_argument("target", help="Target IP or hostname")
         parser.add_argument("save_location", nargs="?", default=os.getcwd(),
@@ -42,10 +43,13 @@ def main():
         parser.add_argument("--web",  action="store_true", help="Web enumeration")
         parser.add_argument("--sql",  action="store_true", help="SQL enumeration")
         parser.add_argument("--smb",  action="store_true", help="SMB enumeration")
-        parser.add_argument("--e4l",  action="store_true", help="enum4linux-ng")
+        parser.add_argument("--linux",  action="store_true", help="Linux Enum")
         parser.add_argument("--ldap", action="store_true", help="LDAP enumeration")
         parser.add_argument("--all-scans-captain", action="store_true",
                             help="Run everything")
+        
+        parser.add_argument("--user", action="store_true", help="Username")
+        parser.add_argument("--passwd", action="store_true", help="Password")
         parser.add_argument("-v","--version", action="store_true", help="Show version")
         args = parser.parse_args()
 
@@ -56,6 +60,8 @@ def main():
         # show banner/blurb…
         fncPrintAsciiBanner()
         fncPrintBlurb()
+        fncCheckPythonVersion()
+        fncCheckConfigFileExists()
 
         # Determine which to run
         if args.all_scans_captain:
@@ -63,9 +69,7 @@ def main():
         else:
             run_web = args.web
             run_sql = args.sql
-            run_smb = args.smb
-            run_e4l = args.e4l
-            run_ldap = args.ldap
+            run_linux = args.linux
 
         target        = args.target
         save_location = args.save_location
@@ -76,54 +80,42 @@ def main():
             fncPrintMessage("No open ports; aborting.", "warning")
             return
 
-        # --- 2) Nmap (with simple resume logic) ---
-        state_dir  = expanduser("~/.rs2nm/temp")
-        os.makedirs(state_dir, exist_ok=True)
-        state_file = join(state_dir, f"rs2nm_{target}.json")
-
-        # Load or initialize state
-        try:
-            with open(state_file, "r", encoding="utf-8") as sf:
-                state = json.load(sf)
-        except (FileNotFoundError, json.JSONDecodeError):
-            state = {}
-
+        state_file, state = fncLoadScanState(target)
         prev_ports     = state.get("ports")
         prev_nmap_done = state.get("nmap_complete", False)
 
-        # Compare ports
-        if prev_ports == open_ports and prev_nmap_done:
-            ans = input("Skip Nmap? (y/n): ").strip().lower()
-            rerun_nmap = (ans == 'y') is False
+        if prev_ports is None:
+            fncPrintMessage("No prior port data; running Nmap.", "info")
+            rerun = True
+        elif prev_ports == open_ports and prev_nmap_done:
+            fncPrintMessage("No changes in open ports since last scan.", "info")
+            rerun = (input("Skip Nmap? (y/n): ").strip().lower() != 'y')
+        elif prev_ports != open_ports:
+            fncPrintMessage("Port set has changed:", "warning")
+            fncPrintMessage(f"Old: {prev_ports}", "info")
+            fncPrintMessage(f"New: {open_ports}", "info")
+            if input("Replace old scan with new ports? (y/n): ").strip().lower() == 'y':
+                state.update({"ports": open_ports, "nmap_complete": False})
+                fncSaveScanState(state_file, state)
+                rerun = True
+            else:
+                fncPrintMessage("Keeping previous port list; skipping Nmap.", "info")
+                rerun = False
         else:
-            # Ports changed or first run
-            rerun_nmap = True
-            # Store new ports and reset flag
-            state["ports"]         = open_ports
-            state["nmap_complete"] = False
-            with open(state_file, "w", encoding="utf-8") as sf:
-                json.dump(state, sf, indent=2)
+            fncPrintMessage("Previous scan incomplete; running Nmap.", "info")
+            rerun = True
 
         nmap_base = os.path.join(save_location, f"{target}_nmap_results")
-        if rerun_nmap:
-            # Run Nmap and store both stdout and stderr
-            nmap_output, nmap_error = fncRunNmap(target, open_ports, nmap_base)
-            if nmap_error:
-                fncPrintMessage(f"Nmap error: {nmap_error}", "error")
-            print(nmap_output)
+        if rerun:
+            nout, nerr = fncRunNmap(target, open_ports, nmap_base)
+            if nerr:
+                fncPrintMessage(f"Nmap error: {nerr}", "error")
+            print(nout)
             fncPrintMessage(f"Nmap saved → {nmap_base}.nmap/.xml/.gnmap", "success")
-
-            # mark complete in JSON state file (preserving ip/ports)
-            try:
-                with open(state_file, "r", encoding="utf-8") as sf:
-                    data = json.load(sf)
-            except (FileNotFoundError, json.JSONDecodeError):
-                data = {}
-            data["nmap_complete"] = True
-            with open(state_file, "w", encoding="utf-8") as sf:
-                json.dump(data, sf, indent=2)
+            state.update({"ports": open_ports, "nmap_complete": True})
+            fncSaveScanState(state_file, state)
+            nmap_output = nout
         else:
-            # If we skip rerun, ensure nmap_output still exists
             nmap_output = ""
 
         # --- 3) Post‐Nmap processing ---
@@ -143,14 +135,13 @@ def main():
             nmap_txt = nmap_base + ".nmap"
             fncRunSQLEnum(nmap_txt, target)
 
-        if run_smb and fncSmbPortsOpen(open_ports):
-            fncRunNetExecSMB(target, save_location)
-
-        if run_e4l:
-            fncRunEnum4LinuxNG(target, save_location)
-
-        if run_ldap:
-            fncRunLdapSearch(target, save_location)
+        if run_linux:
+            fncRunLinuxEnum(
+                target,
+                save_location,
+                username=args.user,
+                password=args.passwd
+            )
 
     except KeyboardInterrupt:
         fncPrintMessage("Interrupted by user. Exiting…", "error")
