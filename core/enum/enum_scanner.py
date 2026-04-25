@@ -1,97 +1,146 @@
+import re
+import shutil
 import subprocess
-import os
-import json
-from core.utils import fncPrintMessage
+
+from core.utils import fncPrintMessage, ask
 from core.handlers import fncLoadScanState, fncSaveScanState
 
+_PORT_RE = re.compile(r'\[([^\]]+)\]')
+
+RUSTSCAN_TIMEOUT = 300   # seconds
+NMAP_TIMEOUT     = 900   # 15 minutes — large port sets can take a while
+
+
+def _check_tool(name: str, hint: str = "") -> bool:
+    if shutil.which(name) is None:
+        msg = f"'{name}' not found in PATH."
+        if hint:
+            msg += f" ({hint})"
+        fncPrintMessage(msg, "error")
+        return False
+    return True
+
+
+def _parse_ports(output: str) -> str:
+    for line in output.splitlines():
+        if "->" in line:
+            m = _PORT_RE.search(line)
+            if m:
+                return m.group(1)
+    return ""
+
+
 def fncRunRustscan(target: str) -> str:
+    if not _check_tool("rustscan", "https://github.com/RustScan/RustScan"):
+        return ""
+
     fncPrintMessage(f"Target: {target}", "success")
-    fncPrintMessage("Checking for existing scan results...", "info")
+    fncPrintMessage("Checking for existing scan results…", "info")
 
     scan_file, state = fncLoadScanState(target)
     old_ports = state.get("ports", "")
-    # quick‐compare
+
     if old_ports:
-        fncPrintMessage("Previous scan data found. Running a quick compare...", "info")
-        quick = subprocess.Popen(
-            ["rustscan","-g","-a",target,"--ulimit","70000"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        out, _ = quick.communicate()
-        new_ports = next(
-            (l.split("->",1)[1].strip()[1:-1]
-             for l in out.decode().splitlines() if "->" in l),
-            ""
-        )
+        fncPrintMessage("Previous scan data found. Running quick compare…", "info")
+        try:
+            quick = subprocess.Popen(
+                ["rustscan", "-g", "-a", target, "--ulimit", "70000"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            out, _ = quick.communicate(timeout=RUSTSCAN_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            quick.kill()
+            fncPrintMessage("Quick scan timed out; using cached ports.", "warning")
+            return old_ports
+        except Exception as e:
+            fncPrintMessage(f"Rustscan error: {e}", "error")
+            return old_ports
+
+        new_ports = _parse_ports(out.decode("utf-8", errors="replace"))
         if not new_ports:
-            fncPrintMessage("Quick scan failed; falling back to full scan.", "warning")
-        elif set(new_ports.split(",")) != set(old_ports.split(",")):
+            fncPrintMessage("Quick scan returned no ports; falling back to cached.", "warning")
+            return old_ports
+
+        if set(new_ports.split(",")) != set(old_ports.split(",")):
             fncPrintMessage("Port set has changed:", "warning")
             fncPrintMessage(f"Old: {old_ports}", "info")
             fncPrintMessage(f"New: {new_ports}", "info")
-            if input("Replace old scan with new ports? (y/n): ").strip().lower() == "y":
+            if ask("Replace old scan with new ports? (y/n): ", default="y") == "y":
                 state.update({"ip": target, "ports": new_ports, "nmap_complete": False})
                 fncSaveScanState(scan_file, state)
                 fncPrintMessage("Updated stored scan data.", "success")
                 return new_ports
             fncPrintMessage("Keeping previous scan data.", "info")
             return old_ports
-        else:
-            return old_ports
 
-    # full scan
-    fncPrintMessage("Running full Rustscan", "info")
-    rs = subprocess.Popen(
-        ["rustscan","-g","-a",target,"--ulimit","70000"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-    out, err = rs.communicate()
-    if err:
-        fncPrintMessage("Rustscan error:\n"+err.decode(), "error")
+        return old_ports
+
+    fncPrintMessage("Running full Rustscan…", "info")
+    try:
+        rs = subprocess.Popen(
+            ["rustscan", "-g", "-a", target, "--ulimit", "70000"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        out, err = rs.communicate(timeout=RUSTSCAN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        rs.kill()
+        fncPrintMessage("Rustscan timed out.", "error")
         return ""
-    ports = next(
-        (l.split("->",1)[1].strip()[1:-1]
-         for l in out.decode().splitlines() if "->" in l),
-        ""
-    )
+    except Exception as e:
+        fncPrintMessage(f"Rustscan error: {e}", "error")
+        return ""
+
+    if err:
+        fncPrintMessage("Rustscan stderr:\n" + err.decode("utf-8", errors="replace"), "error")
+
+    ports = _parse_ports(out.decode("utf-8", errors="replace"))
     if not ports:
         fncPrintMessage("No open ports found by Rustscan.", "info")
         return ""
+
     fncPrintMessage(f"Ports discovered: {ports}", "success")
     state.update({"ip": target, "ports": ports, "nmap_complete": False})
     fncSaveScanState(scan_file, state)
     fncPrintMessage(f"Scan file created: {scan_file}", "info")
     return ports
 
-def fncRunNmap(target: str, ports: str, output_file: str):
-    """
-    Run Nmap against <target> on <ports>, save with -oA <output_file>,
-    and retry with -Pn if host seems down.
-    Returns (stdout, stderr) decoded as strings.
-    """
-    fncPrintMessage("Running Nmap", "info")
-    fncPrintMessage(
-        "This can take a few moments depending on how many ports are available",
-        "info"
-    )
 
+def fncRunNmap(target: str, ports: str, output_file: str):
+    if not _check_tool("nmap", "https://nmap.org/download"):
+        return "", "nmap not found"
+
+    fncPrintMessage("Running Nmap (this may take a few minutes)…", "info")
     command = ["nmap", "-p", ports, "-sC", "-sV", "-oA", output_file, target]
-    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    out, err = proc.communicate()
-    decoded = out.decode()
+
+    try:
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, err = proc.communicate(timeout=NMAP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        fncPrintMessage("Nmap timed out.", "error")
+        return "", "timeout"
+    except Exception as e:
+        fncPrintMessage(f"Nmap error: {e}", "error")
+        return "", str(e)
+
+    decoded = out.decode("utf-8", errors="replace")
 
     if "Note: Host seems down." in decoded:
-        fncPrintMessage("Host seems down. Retrying with -Pn", "warning")
+        fncPrintMessage("Host seems down. Retrying with -Pn…", "warning")
         command.insert(1, "-Pn")
-        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        out, err = proc.communicate()
+        try:
+            proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            out, err = proc.communicate(timeout=NMAP_TIMEOUT)
+            decoded = out.decode("utf-8", errors="replace")
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            fncPrintMessage("Nmap -Pn retry timed out.", "error")
+            return decoded, "timeout"
 
-    return out.decode(), err.decode()
+    return decoded, err.decode("utf-8", errors="replace")
+
 
 def fncDetectOSFromNmap(nmap_output: str) -> str:
-    """
-    Look for common OS strings in Nmap output to return 'windows', 'linux', 'unix', or 'unknown'.
-    """
     if "Windows" in nmap_output:
         return "windows"
     if "Linux" in nmap_output:

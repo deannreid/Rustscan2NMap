@@ -64,4 +64,12 @@ HOSTS_FILE = r'C:\Windows\System32\drivers\etc\hosts' if os.name == 'nt' else '/
 ## Wordlists
 SUB_DOM_LIST = ""
 
-DOM_LIST = "/usr/share/dirbuster/directory-list-1.0.txt"
+# Platform-aware default wordlist; override via --wordlist or custom path at runtime
+if os.name == "nt":
+    DOM_LIST = ""
+else:
+    _candidates = [
+        "/usr/share/dirbuster/directory-list-1.0.txt",
+        "/usr/share/wordlists/dirb/common.txt",
+    ]
+    DOM_LIST = next((p for p in _candidates if os.path.isfile(p)), "")

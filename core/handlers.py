@@ -5,7 +5,7 @@ import re
 import subprocess
 import shutil
 import ipaddress
-import pwd
+import tempfile
 
 from .utils import fncPrintMessage
 from config import CONFIG_PATH, HOSTS_FILE, LDAP_PORTS
@@ -38,16 +38,15 @@ def fncEnsureInstalled(tool_name, install_hint=None):
     return True
 
 def fncLaunchInNewTerminal(script_path: str, args: list[str]):
-    """
+    “””
     On Linux under X11 (including sudo), tries gnome-terminal, konsole, xfce4-terminal,
     xterm or lxterminal with their “hold open” flags so the window stays after exit.
     If no DISPLAY or no emulator found, backgrounds the job.
-    """
+    “””
     import os
     import sys
     import subprocess
     import shutil
-    import pwd
     import shlex
 
     python_cmd = [sys.executable, script_path] + args
@@ -67,12 +66,13 @@ def fncLaunchInNewTerminal(script_path: str, args: list[str]):
     env = os.environ.copy()
     env["DISPLAY"] = display
     launcher_prefix = []
-    if os.geteuid() == 0 and env.get("SUDO_USER"):
+    if os.name != "nt" and os.geteuid() == 0 and env.get("SUDO_USER"):
         try:
+            import pwd
             pw = pwd.getpwnam(env["SUDO_USER"])
             env["XAUTHORITY"] = os.path.join(pw.pw_dir, ".Xauthority")
             launcher_prefix = ["sudo", "-u", env["SUDO_USER"]]
-        except KeyError:
+        except (KeyError, ImportError):
             pass
 
     # Terminals with hold-open support
@@ -193,18 +193,22 @@ def fncAddToHosts(target_input, domains):
         lines.append(f"{target_input}\t{' '.join(selected)}\n")
         lines.append(footer + "\n")
 
-    # 6) Write back
+    # 6) Write back atomically
+    hosts_dir = os.path.dirname(HOSTS_FILE)
     try:
-        with open(HOSTS_FILE, "w", encoding="utf-8") as wf:
-            wf.writelines(lines)
-        fncPrintMessage(
-            f"Added {', '.join(selected)} under RS2NM block",
-            "success"
-        )
-        fncPrintMessage(
-            "!!! Reminder: Remove these entries after your engagement !!!",
-            "warning"
-        )
+        fd, tmp_path = tempfile.mkstemp(dir=hosts_dir, prefix=".rs2nm_hosts_")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as wf:
+                wf.writelines(lines)
+            os.replace(tmp_path, HOSTS_FILE)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+        fncPrintMessage(f"Added {', '.join(selected)} under RS2NM block", "success")
+        fncPrintMessage("!!! Reminder: Remove these entries after your engagement !!!", "warning")
     except PermissionError:
         fncPrintMessage("Permission denied: Unable to write to the hosts file.", "error")
     except Exception as e:
@@ -321,8 +325,15 @@ def fncLoadScanState(target: str):
     return path, state
 
 def fncSaveScanState(path: str, state: dict):
-    """
-    Atomically write the JSON state back out.
-    """
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
+    state_dir = os.path.dirname(path)
+    fd, tmp_path = tempfile.mkstemp(dir=state_dir, prefix=".rs2nm_state_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
